@@ -87,7 +87,7 @@ SECONDS=0
 trap 'echo "ERROR: line no = $LINENO, exit status = $?" >&2; exit 1' ERR
 
 #block device cache cleared
-sudo blkid -c /dev/null > /dev/null
+blkid -c /dev/null > /dev/null
 
 #######################################
 # time spent
@@ -167,12 +167,12 @@ function delete_EBS_volume() {
 # $1: device name
 #######################################
 function check_file_system() {
-	FS=$(sudo blkid $1 | gawk '{print gensub(/^(.+)TYPE=\"(.*)\"/, "\\2", "g")}')
+	FS=$(blkid $1 | gawk '{print gensub(/^(.+)TYPE=\"(.*)\"/, "\\2", "g")}')
 	FS=${FS:0:4}
 	case $FS in
 	"ntfs" )
 		# ntfsfix is included in ntfsprogs or ntfs-3g package
-		CHECK_FS_MSG=$(sudo ntfsfix -n $1 >&1)
+		CHECK_FS_MSG=$(ntfsfix -n $1 >&1)
 		if [ `echo $CHECK_FS_MSG | grep "processed successfully" ` ]; then
 			CHECK_FS="ok"
 		else
@@ -180,7 +180,7 @@ function check_file_system() {
 		fi
 		;;
 	"ext3" )
-		CHECK_FS_MSG=$(sudo fsck -n $1 2>/dev/null >&1)
+		CHECK_FS_MSG=$(fsck -n $1 2>/dev/null >&1)
 		echo $CHECK_FS_MSG | grep "clean" >/dev/null 2>&1
 		if [ $? = 0 ]; then
 			CHECK_FS="ok"
@@ -189,7 +189,7 @@ function check_file_system() {
 		fi
 		;;
 	"ext4" ) 
-		CHECK_FS_MSG=$(sudo fsck -n $1 2>/dev/null >&1)
+		CHECK_FS_MSG=$(fsck -n $1 2>/dev/null >&1)
 		echo $CHECK_FS_MSG | grep "clean" >/dev/null 2>&1
 		if [ $? = 0 ]; then
 			CHECK_FS="ok"
