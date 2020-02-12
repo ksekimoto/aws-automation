@@ -9,7 +9,7 @@ phases:
   install:
     commands:
       # install required binary
-      - "yum install -y which"
+      #- "yum install -y which"
   pre_build:
     commands:
       - export AWS_RAW_CRED=$(curl --silent http://169.254.170.2:80$AWS_CONTAINER_CREDENTIALS_RELATIVE_URI)
@@ -21,6 +21,7 @@ phases:
   build:
     commands:
       - cd "$CODEBUILD_SRC_DIR"
+      - cd check_ebs_snapshot_fs 
       - ./check_ebs_snapshot_fs.sh TAG
 
   post_build:
