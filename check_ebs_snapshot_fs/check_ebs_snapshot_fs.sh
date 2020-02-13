@@ -74,6 +74,8 @@ CHECK_DEVICE="/dev/sdb1"
 VOL_ID=$DEFAULT_VOL_ID
 MOUNT_POINT="/mnt"
 SNS_TOPIC_ARN="arn:aws:sns:ap-northeast-1:876160884475:ks-check-ebs-snapshot"
+#METADATA_IP="169.254.169.254"
+METADATA_IP="169.254.170.2"
 
 ######################################
 # tags
@@ -114,7 +116,7 @@ function time_echo() {
 #######################################
 function get_instance_id() {
 	curl 169.254.169.254/latest/meta-data/instance-id/
-	$INSTANCE_ID=$(curl 169.254.169.254/latest/meta-data/instance-id/)
+	$INSTANCE_ID=$(curl "$METADATA_IP/latest/meta-data/instance-id/"")
 }
 
 #######################################
