@@ -22,7 +22,8 @@ phases:
     commands:
       - cd "$CODEBUILD_SRC_DIR"
       - chmod +x ./check_ebs_snapshot_fs/check_ebs_snapshot_fs.sh
-      - ./check_ebs_snapshot_fs/check_ebs_snapshot_fs.sh TAG
+      - chmod +x ./check_ebs_snapshot_fs/launch_instance.sh
+      - ./check_ebs_snapshot_fs/launch_instance.sh
 
   post_build:
     commands:
