@@ -9,8 +9,7 @@ phases:
   install:
     commands:
       # install required binary
-      - "yum install -y curl"
-      - "yum install -y blkid"
+      #- "yum install -y curl"
   pre_build:
     commands:
       - export AWS_RAW_CRED=$(curl --silent http://169.254.170.2:80$AWS_CONTAINER_CREDENTIALS_RELATIVE_URI)
