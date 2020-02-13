@@ -113,6 +113,7 @@ function time_echo() {
 # get instance id
 #######################################
 function get_instance_id() {
+	curl 169.254.169.254/latest/meta-data/instance-id/
 	$INSTANCE_ID=$(curl 169.254.169.254/latest/meta-data/instance-id/)
 }
 
