@@ -116,7 +116,8 @@ function time_echo() {
 #######################################
 function get_instance_id() {
 	curl http://localhost:51678/v1/metadata
-	$INSTANCE_ID=$(curl "$METADATA_IP/latest/meta-data/instance-id/"")
+	curl "$METADATA_IP/latest/meta-data/instance-id/"
+	$INSTANCE_ID=$(curl "$METADATA_IP/latest/meta-data/instance-id/")
 }
 
 #######################################
