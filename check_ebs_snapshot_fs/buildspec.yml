@@ -9,7 +9,8 @@ phases:
   install:
     commands:
       # install required binary
-      #- "yum install -y curl"
+      - curl -o /usr/bin/jq http://stedolan.github.io/jq/download/linux64/jq
+      - chmod +x /usr/bin/jq
   pre_build:
     commands:
       - aws sts get-caller-identity
