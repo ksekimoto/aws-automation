@@ -23,7 +23,7 @@ SECURITY_GROUP_ID="sg-0fdfac540fc17980a"
 PROFILE_NAME="check_ebs_fs_profile"
 USER_DATA="file://check_ebs_snapshot_fs.sh"
 LOGFILE_PATH="/var/log/launch_instance.log"
-SUDO="sudo"
+SUDO=""
 
 #######################################
 # time spent
