@@ -17,6 +17,7 @@
 # - Amazon Linux EC2 instance which checks the restored volume
 #   set instance id to INSTACNCE_ID environment variable
 # - The target snapshot needs to have a tag (fs_check:need)
+# - executed by root (no sudo)
 #
 # How to use
 # 1. launch an EC2 instance and get the instance id
@@ -54,15 +55,8 @@ SKIP_ATTACH_VOLUME=0
 SKIP_DETACH_VOLUME=0
 SKIP_DELETE_VOLUME=0
 SKIP_SNS_PUBLISH=1
-
-#######################################
-# configurations for debugging
-#######################################
-INSTANCE_ID="i-0bd2988ff2344256a"
-# Linux EBS Volume for testing
-DEFAULT_VOL_ID="vol-07d76faf1d5d1774b"
-# Windows EBS Volume for testing
-#DEFAULT_VOL_ID="vol-01ba46ec4f0984342"
+SHUTDOWN_AT_END=1
+SHUTDOWN_TIMEOUT=3
 
 #######################################
 # default configurations
@@ -74,6 +68,8 @@ CHECK_DEVICE="/dev/sdb1"
 VOL_ID=$DEFAULT_VOL_ID
 MOUNT_POINT="/mnt"
 SNS_TOPIC_ARN="arn:aws:sns:ap-northeast-1:876160884475:ks-check-ebs-snapshot"
+LOGFILE_PATH="/var/log/check_ebs_snapshot_fs.log"
+SUDO=""
 
 ######################################
 # tags
@@ -87,7 +83,7 @@ SECONDS=0
 trap 'echo "ERROR: line no = $LINENO, exit status = $?" >&2; exit 1' ERR
 
 #block device cache cleared
-sudo blkid -c /dev/null > /dev/null
+$SUDO blkid -c /dev/null > /dev/null
 
 #######################################
 # time spent
@@ -105,7 +101,7 @@ function time_spent() {
 function time_echo() {
 	time_spent
 	if [ $SKIP_ECHO_MESSAGE == 0 ]; then
-		echo "$TM $1"
+		echo "$TM $1" | $SUDO tee -a $LOGFILE_PATH
 	fi
 }
 
@@ -113,7 +109,7 @@ function time_echo() {
 # get instance id
 #######################################
 function get_instance_id() {
-	$INSTANCE_ID=$(curl 169.254.169.254/latest/meta-data/instance-id/)
+	INSTANCE_ID=$(curl 169.254.169.254/latest/meta-data/instance-id/)
 }
 
 #######################################
@@ -121,14 +117,9 @@ function get_instance_id() {
 # $1: snapshot id
 #######################################
 function create_EBS_volume() {
-	if [ $2 == 0 ]; then
-		VOL_PARAM=""
-	else
-		VOL_PARAM="--size $2"
-	fi
 	VOL_ID=$(aws ec2 create-volume --region $REGION --availability-zone $AZ --snapshot-id $1 $VOL_PARAM --query VolumeId --output text)
 	sleep 2
-	aws ec2 wait volume-available --volume-ids $VOL_ID > /dev/null 
+	aws ec2 wait volume-available --region $REGION --volume-ids $VOL_ID > /dev/null 
 }
 
 #######################################
@@ -137,8 +128,8 @@ function create_EBS_volume() {
 # $2: volume id
 #######################################
 function attach_EBS_volume() {
-	aws ec2 attach-volume --device $DEVICE --instance-id $1 --volume-id $2 > /dev/null
-	aws ec2 wait volume-in-use --volume-ids $2
+	aws ec2 attach-volume --region $REGION --device $DEVICE --instance-id $1 --volume-id $2 > /dev/null
+	aws ec2 wait volume-in-use --region $REGION --volume-ids $2
 	sleep 2
 }
 
@@ -147,8 +138,8 @@ function attach_EBS_volume() {
 # $1: volume id
 #######################################
 function detach_EBS_volume() {
-	aws ec2 detach-volume --volume-id $1 > /dev/null
-	aws ec2 wait volume-available --volume-ids $1
+	aws ec2 detach-volume --region $REGION --volume-id $1 > /dev/null
+	aws ec2 wait volume-available --region $REGION --volume-ids $1
 	sleep 2
 }
 
@@ -157,8 +148,8 @@ function detach_EBS_volume() {
 # $1: volume id
 #######################################
 function delete_EBS_volume() {
-	aws ec2 delete-volume --volume-id $1 > /dev/null
-	aws ec2 wait volume-deleted --volume-ids $1
+	aws ec2 delete-volume --region $REGION --volume-id $1 > /dev/null
+	aws ec2 wait volume-deleted --region $REGION --volume-ids $1
 	sleep 2 
 }
 
@@ -167,12 +158,12 @@ function delete_EBS_volume() {
 # $1: device name
 #######################################
 function check_file_system() {
-	FS=$(sudo blkid $1 | gawk '{print gensub(/^(.+)TYPE=\"(.*)\"/, "\\2", "g")}')
+	FS=$($SUDO blkid $1 | gawk '{print gensub(/^(.+)TYPE=\"(.*)\"/, "\\2", "g")}')
 	FS=${FS:0:4}
 	case $FS in
 	"ntfs" )
 		# ntfsfix is included in ntfsprogs or ntfs-3g package
-		CHECK_FS_MSG=$(sudo ntfsfix -n $1 >&1)
+		CHECK_FS_MSG=$($SUDO ntfsfix -n $1 >&1)
 		if [ `echo $CHECK_FS_MSG | grep "processed successfully" ` ]; then
 			CHECK_FS="ok"
 		else
@@ -180,7 +171,7 @@ function check_file_system() {
 		fi
 		;;
 	"ext3" )
-		CHECK_FS_MSG=$(sudo fsck -n $1 2>/dev/null >&1)
+		CHECK_FS_MSG=$($SUDO fsck -n $1 2>/dev/null >&1)
 		echo $CHECK_FS_MSG | grep "clean" >/dev/null 2>&1
 		if [ $? = 0 ]; then
 			CHECK_FS="ok"
@@ -189,7 +180,7 @@ function check_file_system() {
 		fi
 		;;
 	"ext4" ) 
-		CHECK_FS_MSG=$(sudo fsck -n $1 2>/dev/null >&1)
+		CHECK_FS_MSG=$($SUDO fsck -n $1 2>/dev/null >&1)
 		echo $CHECK_FS_MSG | grep "clean" >/dev/null 2>&1
 		if [ $? = 0 ]; then
 			CHECK_FS="ok"
@@ -209,7 +200,143 @@ function check_file_system() {
 #######################################
 
 function sns_publish() {
-    MESSAGE_ID=$(aws sns publish --topic-arn $SNS_TOPIC_ARN --message "$1")
+	MESSAGE_ID=$(aws sns publish --topic-arn $SNS_TOPIC_ARN --message "$1")
+}
+
+#######################################
+# config cloudwatch agent
+#######################################
+CLOUDWATCH_CFG=$(cat << EOF
+{ 
+    "agent": { 
+        "metrics_collection_interval": 60, 
+        "run_as_user": "root" 
+    }, 
+    "metrics": { 
+        "append_dimensions": { 
+            "AutoScalingGroupName": "${aws:AutoScalingGroupName}", 
+            "ImageId": "${aws:ImageId}", 
+            "InstanceId": "${aws:InstanceId}", 
+            "InstanceType": "${aws:InstanceType}" 
+        }, 
+        "metrics_collected": { 
+            "collectd": { 
+                "metrics_aggregation_interval": 60 
+            }, 
+            "mem": { 
+                "measurement": [ 
+                    "mem_used_percent"
+                ], 
+                "metrics_collection_interval": 60 
+            }, 
+            "statsd": { 
+                "metrics_aggregation_interval": 60, 
+                "metrics_collection_interval": 60, 
+                "service_address": ":8125" 
+            }, 
+            "swap": { 
+                "measurement": [ 
+                    "swap_used_percent"
+                ], 
+                "metrics_collection_interval": 60 
+            } 
+        } 
+    } 
+} 
+EOF
+)
+
+#######################################
+# install cloudwatchlog agent
+#######################################
+function install_cloudwatchlog_agent() {
+	#$SUDO yum update -y
+	$SUDO yum install -y awslogs
+}
+
+#######################################
+# config cloudwatchlog agent
+#######################################
+CLOUDWATCHLOG_CFG=$(cat << EOF
+[/var/log/cloud-init.log]
+datetime_format = %Y-%m-%d %H:%M:%S.%f
+file = /var/log/cloud-init.log
+buffer_duration = 5000
+log_stream_name = {instance_id}
+initial_position = start_of_file
+log_group_name = /var/log/cloud-init.log
+[/var/log/check_ebs_snapshot_fs.log]
+datetime_format = %Y-%m-%d %H:%M:%S.%f
+file = /var/log/check_ebs_snapshot_fs.log
+buffer_duration = 5000
+log_stream_name = {instance_id}
+initial_position = start_of_file
+log_group_name = check_ebs_snapshot_fs.log
+EOF
+)
+
+function config_cloudwatchlog_agent() {
+	$SUDO sed -i -e "s/us-east-1/ap-northeast-1/" /etc/awslogs/awscli.conf
+	echo "$CLOUDWATCHLOG_CFG" | $SUDO tee -a /etc/awslogs/awslogs.conf
+}
+
+#######################################
+# start cloudwatchlog agent
+#######################################
+function start_cloudwatchlog_agent() {
+	$SUDO service awslogsd start
+}
+
+#######################################
+# check ebs snapshot fs
+# $1: snapshot id
+#######################################
+function check_ebs_snapshot_fs() {
+	if [ "$1" == "" ]; then
+		time_echo "snapshot($SP_TAG_KEY:$SP_TAG_VALUE_NEED) was not found"
+		exit 1
+	else
+		time_echo "snapshot($SP_TAG_KEY:$SP_TAG_VALUE_NEED) was found as $1"
+	fi
+
+	time_echo "creating volume from snapshot($1)"
+	if [ $SKIP_CREATE_VOLUME == 0 ]; then
+		create_EBS_volume $1
+	else
+		VOL_ID=$DEFAULT_VOL_ID
+	fi
+	time_echo "volume($VOL_ID) created"
+
+	if [ $SKIP_ATTACH_VOLUME == 0 ]; then
+		time_echo "volume($VOL_ID) attaching.."
+		attach_EBS_volume $INSTANCE_ID $VOL_ID
+		time_echo "volume($VOL_ID) attached"
+	fi
+
+	check_file_system $CHECK_DEVICE
+	time_echo "file system($FS) ==> $CHECK_FS"
+	time_echo "$CHECK_FS_MSG"
+
+	if [ $SKIP_SNS_PUBLISH == 0 ]; then
+		time_echo "message sending"
+		sns_publish "Snapshot ID: $1, File System: $FS, MSG: $CHECK_FS_MSG"
+		#echo $MESSAGE_ID
+	fi
+
+	if [ $SKIP_DETACH_VOLUME == 0 ]; then
+		time_echo "volume($VOL_ID) detaching..."
+		detach_EBS_volume $VOL_ID
+		time_echo "volume($VOL_ID) detached"
+	fi
+
+	if [ $SKIP_DELETE_VOLUME == 0 ]; then
+		time_echo "volume($VOL_ID) deleting..."
+		delete_EBS_volume $VOL_ID
+		time_echo "volume($VOL_ID) deleted"
+	fi
+
+	aws ec2 create-tags --region $REGION --resources $1 --tags Key=$SP_TAG_KEY,Value=$CHECK_FS
+	time_echo "snapshot($1) taggged as $SP_TAG_KEY:$CHECK_FS"
 }
 
 #######################################
@@ -227,64 +354,31 @@ function sns_publish() {
 #else
 #	SNAPSHOT_ID=$1
 #fi
-#if [ "$2" == "" ]; then
-#	time_echo "volume size is not provided. using default vale."
-#	VOL_SIZE=0
-#else
-#	VOL_SIZE=$2
-#fi
 
+time_echo "cloudwatchlog agent installing..."
+install_cloudwatchlog_agent
+config_cloudwatchlog_agent
+start_cloudwatchlog_agent
+time_echo "cloudwatchlog agent started"
+
+time_echo "trying to get Instance id from meta data"
 get_instance_id
 time_echo "Instance id($INSTANCE_ID)"
 
-SNAPSHOT_IDS=$(aws ec2 describe-snapshots --filters "Name=tag:$SP_TAG_KEY,Values=$SP_TAG_VALUE_NEED" --query "Snapshots[*].{ID:SnapshotId}" --output text)
-SNAPSHOT_ID=$(echo $SNAPSHOT_IDS | awk '{print $1}')
+SNAPSHOT_IDS=$(aws ec2 describe-snapshots --region $REGION --filters "Name=tag:$SP_TAG_KEY,Values=$SP_TAG_VALUE_NEED" --query "Snapshots[*].{ID:SnapshotId}" --output text)
+#SNAPSHOT_ID=$(echo $SNAPSHOT_IDS | awk '{print $1}')
 
-if [ "$SNAPSHOT_ID" == "" ]; then
-	time_echo "snapshot($SP_TAG_KEY:$SP_TAG_VALUE_NEED) was not found"
-	exit 1
+ary=(`echo $SNAPSHOT_IDS`)
+time_echo "${#ary[@]} snapshot(s) were(was) found"
+for i in `seq 1 ${#ary[@]}`
+do
+	time_echo "##### snapshot(${ary[$i-1]}) starting..."
+	check_ebs_snapshot_fs ${ary[$i-1]}
+	time_echo "##### snapshot(${ary[$i-1]}) done"
+done
+
+if [ $SHUTDOWN_AT_END == 1 ]; then
+	$SUDO shutdown -h $SHUTDOWN_TIMEOUT
 else
-	time_echo "snapshot($SP_TAG_KEY:$SP_TAG_VALUE_NEED) was found as $SNAPSHOT_ID"
+	exit 0
 fi
-
-time_echo "creating volume from snapshot($SNAPSHOT_ID)"
-if [ $SKIP_CREATE_VOLUME == 0 ]; then
-	create_EBS_volume $SNAPSHOT_ID $VOL_SIZE
-else
-	VOL_ID=$DEFAULT_VOL_ID
-fi
-
-time_echo "volume($VOL_ID) created"
-
-if [ $SKIP_ATTACH_VOLUME == 0 ]; then
-	time_echo "volume($VOL_ID) attaching.."
-	attach_EBS_volume $INSTANCE_ID $VOL_ID
-	time_echo "volume($VOL_ID) attached"
-fi
-
-check_file_system $CHECK_DEVICE
-time_echo "file system($FS) ==> $CHECK_FS"
-time_echo "$CHECK_FS_MSG"
-
-if [ $SKIP_SNS_PUBLISH == 0 ]; then
-	time_echo "message sending"
-	sns_publish "Snapshot ID: $SNAPSHOT_ID, File System: $FS, MSG: $CHECK_FS_MSG"
-	#echo $MESSAGE_ID
-fi
-
-if [ $SKIP_DETACH_VOLUME == 0 ]; then
-	time_echo "volume($VOL_ID) detaching..."
-	detach_EBS_volume $VOL_ID
-	time_echo "volume($VOL_ID) detached"
-fi
-
-if [ $SKIP_DELETE_VOLUME == 0 ]; then
-	time_echo "volume($VOL_ID) deleting..."
-	delete_EBS_volume $VOL_ID
-	time_echo "volume($VOL_ID) deleted"
-fi
-
-aws ec2 create-tags --resources $SNAPSHOT_ID --tags Key=$SP_TAG_KEY,Value=$CHECK_FS
-time_echo "snapshot($SNAPSHOT_ID) taggged as $SP_TAG_KEY:$CHECK_FS"
-
-exit 0
